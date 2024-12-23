@@ -1,0 +1,12 @@
+#ignore db items
+*.db
+*.sqlite3
+student_reader.db
+
+#ignore environment variables
+.env
+
+#ignore virtual environment
+venv/
+
+__pycache__/

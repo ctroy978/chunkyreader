@@ -1,16 +1,12 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Form, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
-from datetime import datetime, timezone
-import html
 from typing import List
-import re
 
-from database import get_session, create_db_and_tables
-from models import Text, TextBase, TextChunk
+from database import create_db_and_tables
 
-from routers import addtext
+from routers import addtext, student
 
 
 @asynccontextmanager
@@ -34,3 +30,4 @@ app.add_middleware(
 
 
 app.include_router(addtext.router)
+app.include_router(student.router)

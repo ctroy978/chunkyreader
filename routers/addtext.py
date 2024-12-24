@@ -76,6 +76,7 @@ async def create_text(
         content=sanitized_content,
         created_at=datetime.now(timezone.utc),
         teacher_id=teacher_id,
+        total_chunks=len(chunks),
     )
 
     session.add(text)

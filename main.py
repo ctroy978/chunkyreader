@@ -7,6 +7,7 @@ from typing import List
 from database import create_db_and_tables
 
 from routers import addtext, student
+from auth.routes import router as auth_router
 
 
 @asynccontextmanager
@@ -19,6 +20,9 @@ app = FastAPI(
     title="Student Reader API",
     lifespan=lifespan,
 )
+
+
+app.include_router(auth_router, prefix="/auth")
 
 app.add_middleware(
     CORSMiddleware,

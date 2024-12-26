@@ -3,11 +3,13 @@ from sqlmodel import Session
 from typing import Optional
 from datetime import timedelta
 from pydantic import BaseModel, EmailStr
+from models import User
 
 from database import get_session
 from .dependencies import (
     create_access_token,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    get_current_user,
 )
 from .otp import OTPHandler
 
@@ -57,12 +59,18 @@ async def verify_otp(
     return Token(access_token=access_token, token_type="bearer")
 
 
-@router.get("/me")
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    """Protected endpoint - returns current user's information"""
-    return {
-        "username": current_user.username,
-        "email": current_user.email,
-        "full_name": current_user.full_name,
-        "is_teacher": current_user.is_teacher,
-    }
+class UserResponse(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str
+    is_teacher: bool
+
+
+@router.get("/me", response_model=UserResponse)
+async def read_users_me(current_user: User = Depends(get_current_user)) -> UserResponse:
+    return UserResponse(
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        is_teacher=current_user.is_teacher,
+    )

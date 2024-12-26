@@ -12,10 +12,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 # Security configuration
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+# Validate required environment variables
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable must be set")
+if not ALGORITHM:
+    raise ValueError("ALGORITHM environment variable must be set")
 
 # Password hashing configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -54,7 +61,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
 
-    to_encode.update({"exp": expire})
+    to_encode.update(
+        {"exp": expire, "iat": datetime.now(timezone.utc), "type": "access"}
+    )
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -70,13 +79,13 @@ async def get_current_user(
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        email: str = payload.get("sub")
+        if email is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = get_user(db, username)
+    user = get_user_by_email(db, email)
     if user is None:
         raise credentials_exception
 
@@ -90,4 +99,22 @@ async def get_current_active_user(
     # You might want to add a 'disabled' field to your User model
     # if current_user.disabled:
     #     raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+
+async def get_current_teacher(current_user: User = Depends(get_current_user)) -> User:
+    if not current_user.is_teacher:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only teachers can access this resource",
+        )
+    return current_user
+
+
+async def get_current_student(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.is_teacher:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can access this resource",
+        )
     return current_user

@@ -7,7 +7,8 @@ from typing import List
 import re
 
 from database import get_session
-from models import Text, TextBase, TextChunk
+from models import Text, TextBase, TextChunk, User
+from auth.dependencies import get_current_teacher
 
 
 router = APIRouter(prefix="/addtext", tags=["teachers"])
@@ -61,7 +62,8 @@ def split_into_chunks(content: str) -> List[str]:
 async def create_text(
     title: str = Form(...),
     content: str = Form(...),
-    teacher_id: int = Form(None),
+    # teacher_id: int = Form(None),
+    current_teacher: User = Depends(get_current_teacher),
     session: Session = Depends(get_session),
 ):
     sanitized_title = sanitize_text(title)
@@ -75,7 +77,8 @@ async def create_text(
         title=sanitized_title,
         content=sanitized_content,
         created_at=datetime.now(timezone.utc),
-        teacher_id=teacher_id,
+        # teacher_id=teacher_id,
+        teacher_id=current_teacher.id,  # Instead of teacher_id=teacher_id
         total_chunks=len(chunks),
     )
 
@@ -97,8 +100,41 @@ async def create_text(
     return text
 
 
+# @router.delete("/texts/{text_id}")
+# async def delete_text(text_id: int, session: Session = Depends(get_session)):
+#     # Delete associated chunks first
+#     chunks_statement = select(TextChunk).where(TextChunk.text_id == text_id)
+#     chunks = session.exec(chunks_statement).all()
+#     for chunk in chunks:
+#         session.delete(chunk)
+
+#     # Delete the text
+#     text = session.get(Text, text_id)
+#     if not text:
+#         raise HTTPException(status_code=404, detail="Text not found")
+
+#     session.delete(text)
+#     session.commit()
+
+#     return {"message": f"Text {text_id} and its chunks deleted"}
+
+
 @router.delete("/texts/{text_id}")
-async def delete_text(text_id: int, session: Session = Depends(get_session)):
+async def delete_text(
+    text_id: int,
+    session: Session = Depends(get_session),
+    current_teacher: User = Depends(get_current_teacher),
+):
+    # Verify the text belongs to the current teacher
+    text = session.get(Text, text_id)
+    if not text:
+        raise HTTPException(status_code=404, detail="Text not found")
+
+    if text.teacher_id != current_teacher.id:
+        raise HTTPException(
+            status_code=403, detail="Not authorized to delete this text"
+        )
+
     # Delete associated chunks first
     chunks_statement = select(TextChunk).where(TextChunk.text_id == text_id)
     chunks = session.exec(chunks_statement).all()
@@ -106,10 +142,6 @@ async def delete_text(text_id: int, session: Session = Depends(get_session)):
         session.delete(chunk)
 
     # Delete the text
-    text = session.get(Text, text_id)
-    if not text:
-        raise HTTPException(status_code=404, detail="Text not found")
-
     session.delete(text)
     session.commit()
 

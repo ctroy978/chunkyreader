@@ -10,6 +10,7 @@ from database import get_session
 import os
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 
@@ -27,8 +28,11 @@ if not ALGORITHM:
 # Password hashing configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# OAuth2 configuration
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# OAuth2 configuration --- either one or the other, not both.
+
+# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/verify-otp")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

@@ -3,19 +3,29 @@ from sqlmodel import Session, select
 from typing import List
 from database import get_session
 from models import User, Text, TextChunk
+from auth.dependencies import get_current_user
+
 
 router = APIRouter(prefix="/student", tags=["students"])
 
 
 @router.get("/teachers/", response_model=List[dict])
-async def get_teachers(session: Session = Depends(get_session)):
+async def get_teachers(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     """Get all teachers"""
+
     teachers = session.exec(select(User).where(User.is_teacher == True)).all()
     return [{"id": t.id, "full_name": t.full_name} for t in teachers]
 
 
 @router.get("/teachers/{teacher_id}/texts", response_model=List[dict])
-async def get_teacher_texts(teacher_id: int, session: Session = Depends(get_session)):
+async def get_teacher_texts(
+    teacher_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     """Get all texts for a specific teacher"""
     # Verify the requested user is actually a teacher
     teacher = session.exec(
@@ -31,7 +41,11 @@ async def get_teacher_texts(teacher_id: int, session: Session = Depends(get_sess
 
 
 @router.get("/texts/{text_id}/first-chunk")
-async def get_first_chunk(text_id: int, session: Session = Depends(get_session)):
+async def get_first_chunk(
+    text_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
     """Get the first chunk of a specific text"""
     chunk = session.exec(
         select(TextChunk)
@@ -51,7 +65,10 @@ async def get_first_chunk(text_id: int, session: Session = Depends(get_session))
 
 @router.get("/texts/{text_id}/next-chunk/{current_chunk_id}")
 async def get_next_chunk(
-    text_id: int, current_chunk_id: int, session: Session = Depends(get_session)
+    text_id: int,
+    current_chunk_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """Get the next chunk of text after the current chunk"""
     # First get the current chunk to know its sequence number

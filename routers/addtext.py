@@ -100,23 +100,20 @@ async def create_text(
     return text
 
 
-# @router.delete("/texts/{text_id}")
-# async def delete_text(text_id: int, session: Session = Depends(get_session)):
-#     # Delete associated chunks first
-#     chunks_statement = select(TextChunk).where(TextChunk.text_id == text_id)
-#     chunks = session.exec(chunks_statement).all()
-#     for chunk in chunks:
-#         session.delete(chunk)
+@router.get("/texts/", response_model=List[dict])
+async def get_texts(
+    session: Session = Depends(get_session),
+    current_teacher: User = Depends(get_current_teacher),
+):
+    """Get all texts for the current teacher"""
+    texts = session.exec(
+        select(Text).where(Text.teacher_id == current_teacher.id)
+    ).all()
 
-#     # Delete the text
-#     text = session.get(Text, text_id)
-#     if not text:
-#         raise HTTPException(status_code=404, detail="Text not found")
-
-#     session.delete(text)
-#     session.commit()
-
-#     return {"message": f"Text {text_id} and its chunks deleted"}
+    return [
+        {"id": text.id, "title": text.title, "created_at": text.created_at}
+        for text in texts
+    ]
 
 
 @router.delete("/texts/{text_id}")

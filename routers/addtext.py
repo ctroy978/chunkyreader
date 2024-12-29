@@ -230,25 +230,6 @@ async def get_texts(
     ]
 
 
-# @router.post("/texts/", response_model=Text)
-# async def create_text(
-#     request: Request,  # Add this to see raw request
-#     title: str = Form(...),
-#     content: str = Form(...),
-#     current_teacher: User = Depends(get_current_teacher),
-#     session: Session = Depends(get_session),
-# ):
-#     # Debug logging
-#     body = await request.body()
-#     print("Raw request body:", body)
-#     print("Content type:", request.headers.get("content-type"))
-#     print("Current teacher:", current_teacher)
-
-#     sanitized_title = sanitize_text(title)
-#     sanitized_content = sanitize_text(content)
-#     ...
-
-
 @router.delete("/texts/{text_id}")
 async def delete_text(
     text_id: int,

@@ -68,3 +68,22 @@ class ReadingCompletion(SQLModel, table=True):
 
     student: User = Relationship(back_populates="reading_completions")
     text: Text = Relationship(back_populates="completions")
+
+
+class ReadingSession(SQLModel, table=True):
+    """Tracks the conversation state for a user reading a specific chunk"""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    text_id: int = Field(foreign_key="text.id")
+    chunk_id: int = Field(foreign_key="textchunk.id")
+    current_question: str
+    conversation_context: str  # Stores the conversation history
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime  # When this session should be cleaned up
+    is_completed: bool = Field(default=False)
+
+    # Relationships
+    user: User = Relationship()
+    text: Text = Relationship()
+    chunk: TextChunk = Relationship()

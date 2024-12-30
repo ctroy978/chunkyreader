@@ -2,14 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from database import get_session
-from models import TextChunk
+from models import TextChunk, User
+from dotenv import load_dotenv
+import os
+
 
 router = APIRouter(prefix="/questions", tags=["questions"])
+
+load_dotenv()
 
 
 class QuestionRequest(BaseModel):
     chunk_id: int
     text_id: int
+    user_email: str
 
 
 class QuestionResponse(BaseModel):
@@ -35,5 +41,10 @@ async def generate_question(
     # Store the chunk text in a variable
     chunk_text = chunk.content
 
-    # TODO: Use chunk_text to generate an appropriate question
-    return QuestionResponse(question="What is the main idea of this passage?")
+    # get the username of the student
+    statement = select(User).where(User.email == request.user_email)
+    user = db.exec(statement).first()
+
+    return QuestionResponse(
+        question=f"Hello {user.username}! What is the main idea of this passage?"
+    )

@@ -1,9 +1,13 @@
 from sqlmodel import Session, select
 from datetime import datetime, timedelta, timezone
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, APIRouter
 from models import ReadingSession
 from typing import Optional, List, Dict
 import json
+from sqlalchemy import text
+
+
+router = APIRouter(prefix="/session_manager", tags=["questions"])
 
 
 class ReadingSessionManager:
@@ -14,29 +18,27 @@ class ReadingSessionManager:
     async def create_or_get_session(
         self, user_id: int, text_id: int, chunk_id: int, initial_question: str
     ) -> ReadingSession:
-        """Create a new reading session or get existing one"""
-        # First cleanup any expired sessions
         await self._cleanup_expired_sessions()
 
-        # Check for existing active session
         existing = self.db.exec(
             select(ReadingSession).where(
                 ReadingSession.user_id == user_id,
-                ReadingSession.chunk_id == chunk_id,
+                ReadingSession.text_id == text_id,
                 ReadingSession.is_completed == False,
             )
         ).first()
 
         if existing:
+            existing.chunk_id = chunk_id  # Update current chunk
+            self.db.commit()
             return existing
 
-        # Create new session
         new_session = ReadingSession(
             user_id=user_id,
             text_id=text_id,
             chunk_id=chunk_id,
             current_question=initial_question,
-            conversation_context=json.dumps([]),  # Start with empty context array
+            conversation_context=json.dumps([]),
             expires_at=datetime.now(timezone.utc) + self.SESSION_EXPIRY,
             is_completed=False,
         )
@@ -46,14 +48,12 @@ class ReadingSessionManager:
         self.db.refresh(new_session)
         return new_session
 
-    async def get_session(
-        self, user_id: int, chunk_id: int
-    ) -> Optional[ReadingSession]:
-        """Get an existing session if it exists"""
+    async def get_session(self, user_id: int, text_id: int) -> Optional[ReadingSession]:
+        """Get existing session by text_id"""
         return self.db.exec(
             select(ReadingSession).where(
                 ReadingSession.user_id == user_id,
-                ReadingSession.chunk_id == chunk_id,
+                ReadingSession.text_id == text_id,
                 ReadingSession.is_completed == False,
             )
         ).first()
@@ -141,9 +141,7 @@ class ReadingSessionManager:
         ).all()
 
     async def _cleanup_expired_sessions(self):
-        """Remove expired sessions"""
-        self.db.exec(
-            "DELETE FROM readingsession WHERE expires_at < :now",
+        self.db.execute(
+            text("DELETE FROM readingsession WHERE expires_at < :now"),
             {"now": datetime.now(timezone.utc)},
         )
-        self.db.commit()

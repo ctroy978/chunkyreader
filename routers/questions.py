@@ -143,20 +143,11 @@ async def generate_question(
         user_id=user.id, text_id=request.text_id, chunk_id=request.chunk_id, db=db
     )
 
-    # Add chunk to conversation
-    await append_to_conversation(
-        session_id=session.id,
-        role="system",
-        content=f"CHUNK: {chunk.content}",
-        msg_type="chunk",
-        db=db,
-    )
-
     # For testing, use dummy question
-    current_question = "how do you feel about this."
+    # current_question = "how do you feel about this."
 
     # When ready for AI, uncomment this:
-    # current_question = await build_question(chunk.content)
+    current_question = await build_question(chunk.content)
 
     # Add question to conversation
     await append_to_conversation(
@@ -182,35 +173,52 @@ async def evaluate_answer(
             status_code=status.HTTP_404_NOT_FOUND, detail="Text Chunk not found"
         )
 
-    # result = await build_evaluation(chunk, request.current_question, request.answer)
-    # return AnswerEvalResponse(
-    #     message=result.data.message,
-    #     can_proceed=result.data.can_proceed,
-    #     question=result.data.question,
-    #     conversation_id="dummy-number 123",
-    # )
-
-    """
-    Evaluate student's answer and determine if they can proceed.
-    This is a dummy version that alternates between proceeding and asking follow-up.
-    """
-    # This is just a dummy response - will be replaced with real AI logic
-    # For testing, let's just alternate between proceed and follow-up
-    import random
-
-    is_satisfactory = random.choice([True, False])
-
-    if is_satisfactory:
-        return AnswerEvalResponse(
-            message="Excellent work! You've shown good understanding of this section.",
-            can_proceed=True,
-            question=None,
-            conversation_id="dummy-convo-123",
+    # Get user info
+    statement = select(User).where(User.email == request.user_email)
+    user = db.exec(statement).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    else:
-        return AnswerEvalResponse(
-            message="Good start, but let's explore this further.",
-            can_proceed=False,
-            question="Can you provide a specific example from the text to support your answer?",
-            conversation_id="dummy-convo-123",
+
+        # Get/create session
+    session = await get_or_create_session(
+        user_id=user.id, text_id=request.text_id, chunk_id=request.chunk_id, db=db
+    )
+
+    # Store student's answer
+    await append_to_conversation(
+        session_id=session.id,
+        role="user",
+        content=request.answer,
+        msg_type="answer",
+        db=db,
+    )
+
+    result = await build_evaluation(chunk, request.current_question, request.answer)
+
+    # Store feedback
+    await append_to_conversation(
+        session_id=session.id,
+        role="assistant",
+        content=result.data.message,
+        msg_type="feedback",
+        db=db,
+    )
+
+    # Store follow-up question if exists
+    if result.data.question:
+        await append_to_conversation(
+            session_id=session.id,
+            role="assistant",
+            content=result.data.question,
+            msg_type="question",
+            db=db,
         )
+
+    return AnswerEvalResponse(
+        message=result.data.message,
+        can_proceed=result.data.can_proceed,
+        question=result.data.question,
+        conversation_id=str(session.id),
+    )

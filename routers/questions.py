@@ -144,10 +144,10 @@ async def generate_question(
     )
 
     # For testing, use dummy question
-    # current_question = "how do you feel about this."
+    current_question = "how do you feel about this."
 
     # When ready for AI, uncomment this:
-    current_question = await build_question(chunk.content)
+    # current_question = await build_question(chunk.content)
 
     # Add question to conversation
     await append_to_conversation(
@@ -195,30 +195,37 @@ async def evaluate_answer(
         db=db,
     )
 
-    result = await build_evaluation(chunk, request.current_question, request.answer)
+    # result = await build_evaluation(chunk, request.current_question, request.answer)
 
-    # Store feedback
-    await append_to_conversation(
-        session_id=session.id,
-        role="assistant",
-        content=result.data.message,
-        msg_type="feedback",
-        db=db,
-    )
+    # # Store feedback
+    # await append_to_conversation(
+    #     session_id=session.id,
+    #     role="assistant",
+    #     content=result.data.message,
+    #     msg_type="feedback",
+    #     db=db,
+    # )
 
-    # Store follow-up question if exists
-    if result.data.question:
-        await append_to_conversation(
-            session_id=session.id,
-            role="assistant",
-            content=result.data.question,
-            msg_type="question",
-            db=db,
-        )
+    # # Store follow-up question if exists
+    # if result.data.question:
+    #     await append_to_conversation(
+    #         session_id=session.id,
+    #         role="assistant",
+    #         content=result.data.question,
+    #         msg_type="question",
+    #         db=db,
+    #     )
+
+    # return AnswerEvalResponse(
+    #     message=result.data.message,
+    #     can_proceed=result.data.can_proceed,
+    #     question=result.data.question,
+    #     conversation_id=str(session.id),
+    # )
 
     return AnswerEvalResponse(
-        message=result.data.message,
-        can_proceed=result.data.can_proceed,
-        question=result.data.question,
-        conversation_id=str(session.id),
+        message="This is the message",
+        can_proceed=True,
+        question="This is from question",
+        conversation_id="dummy_id 123",
     )

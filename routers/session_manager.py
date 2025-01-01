@@ -1,147 +1,71 @@
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
-from datetime import datetime, timedelta, timezone
-from fastapi import HTTPException, status, APIRouter
+from database import get_session
 from models import ReadingSession
-from typing import Optional, List, Dict
 import json
-from sqlalchemy import text
+
+router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-router = APIRouter(prefix="/session_manager", tags=["questions"])
+async def get_or_create_session(
+    user_id: int, text_id: int, chunk_id: int, db: Session
+) -> ReadingSession:
+    """Get existing session or create new one"""
+    # Try to find existing active session
+    statement = select(ReadingSession).where(
+        ReadingSession.user_id == user_id,
+        ReadingSession.text_id == text_id,
+        ReadingSession.is_completed == False,
+    )
+    session = db.exec(statement).first()
+
+    # Create new session if none exists
+    if not session:
+        session = ReadingSession(user_id=user_id, text_id=text_id, chunk_id=chunk_id)
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+    return session
 
 
-class ReadingSessionManager:
-    def __init__(self, db: Session):
-        self.db = db
-        self.SESSION_EXPIRY = timedelta(days=7)  # Sessions expire after 1 week
+async def append_to_conversation(
+    session_id: int,
+    role: str,  # 'system', 'assistant', or 'user'
+    content: str,
+    msg_type: str,  # 'chunk', 'question', or 'answer'
+    db: Session,
+) -> None:
+    """Add a new message to the conversation context"""
+    session = db.get(ReadingSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    async def create_or_get_session(
-        self, user_id: int, text_id: int, chunk_id: int, initial_question: str
-    ) -> ReadingSession:
-        await self._cleanup_expired_sessions()
+    # Load existing conversation
+    conversation = json.loads(session.conversation_context)
 
-        existing = self.db.exec(
-            select(ReadingSession).where(
-                ReadingSession.user_id == user_id,
-                ReadingSession.text_id == text_id,
-                ReadingSession.is_completed == False,
-            )
-        ).first()
+    # Add new message
+    conversation.append({"role": role, "content": content, "type": msg_type})
 
-        if existing:
-            existing.chunk_id = chunk_id  # Update current chunk
-            self.db.commit()
-            return existing
+    # Save updated conversation
+    session.conversation_context = json.dumps(conversation)
+    db.commit()
 
-        new_session = ReadingSession(
-            user_id=user_id,
-            text_id=text_id,
-            chunk_id=chunk_id,
-            current_question=initial_question,
-            conversation_context=json.dumps([]),
-            expires_at=datetime.now(timezone.utc) + self.SESSION_EXPIRY,
-            is_completed=False,
-        )
 
-        self.db.add(new_session)
-        self.db.commit()
-        self.db.refresh(new_session)
-        return new_session
+async def get_conversation_context(session_id: int, db: Session) -> str:
+    """Retrieve the full conversation context"""
+    session = db.get(ReadingSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    async def get_session(self, user_id: int, text_id: int) -> Optional[ReadingSession]:
-        """Get existing session by text_id"""
-        return self.db.exec(
-            select(ReadingSession).where(
-                ReadingSession.user_id == user_id,
-                ReadingSession.text_id == text_id,
-                ReadingSession.is_completed == False,
-            )
-        ).first()
+    return session.conversation_context
 
-    async def update_conversation(
-        self,
-        session_id: int,
-        user_id: int,
-        new_message: Dict,
-        new_question: Optional[str] = None,
-    ) -> ReadingSession:
-        """Update the conversation context with a new message"""
-        session = self.db.exec(
-            select(ReadingSession).where(
-                ReadingSession.id == session_id, ReadingSession.user_id == user_id
-            )
-        ).first()
 
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Reading session not found",
-            )
-
-        # Load existing conversation
-        try:
-            conversation = json.loads(session.conversation_context)
-        except json.JSONDecodeError:
-            conversation = []
-
-        # Add new message
-        conversation.append(new_message)
-
-        # Update session
-        session.conversation_context = json.dumps(conversation)
-        if new_question:
-            session.current_question = new_question
-        session.expires_at = (
-            datetime.now(timezone.utc) + self.SESSION_EXPIRY
-        )  # Reset expiration
-
-        self.db.commit()
-        self.db.refresh(session)
-        return session
-
-    async def get_conversation_history(
-        self, session_id: int, user_id: int
-    ) -> List[Dict]:
-        """Get the conversation history for a session"""
-        session = self.db.exec(
-            select(ReadingSession).where(
-                ReadingSession.id == session_id, ReadingSession.user_id == user_id
-            )
-        ).first()
-
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Reading session not found",
-            )
-
-        try:
-            return json.loads(session.conversation_context)
-        except json.JSONDecodeError:
-            return []
-
-    async def complete_session(self, session_id: int, user_id: int):
-        """Mark a session as completed"""
-        session = self.db.exec(
-            select(ReadingSession).where(
-                ReadingSession.id == session_id, ReadingSession.user_id == user_id
-            )
-        ).first()
-
-        if session:
-            session.is_completed = True
-            self.db.commit()
-
-    async def get_incomplete_sessions(self, user_id: int) -> List[ReadingSession]:
-        """Get all incomplete sessions for a user"""
-        return self.db.exec(
-            select(ReadingSession).where(
-                ReadingSession.user_id == user_id, ReadingSession.is_completed == False
-            )
-        ).all()
-
-    async def _cleanup_expired_sessions(self):
-        self.db.execute(
-            text("DELETE FROM readingsession WHERE expires_at < :now"),
-            {"now": datetime.now(timezone.utc)},
-        )
+async def get_current_question(session_id: int, db: Session) -> str:
+    """Helper function to get the current question from conversation context"""
+    conversation = json.loads(await get_conversation_context(session_id, db))
+    # Find the last question in the conversation
+    for message in reversed(conversation):
+        if message["type"] == "question":
+            return message["content"]
+    return ""

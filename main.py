@@ -35,5 +35,5 @@ app.add_middleware(
 
 app.include_router(addtext.router)
 app.include_router(student.router)
-app.include_router(questions.router)  # Added this line
+app.include_router(questions.router)
 app.include_router(session_manager.router)

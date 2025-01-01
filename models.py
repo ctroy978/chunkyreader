@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 class User(SQLModel, table=True):
@@ -71,19 +71,24 @@ class ReadingCompletion(SQLModel, table=True):
 
 
 class ReadingSession(SQLModel, table=True):
-    """Tracks the conversation state for a user reading a specific chunk"""
-
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.id")
-    text_id: int = Field(foreign_key="text.id")
-    chunk_id: int = Field(foreign_key="textchunk.id")
-    current_question: str
-    conversation_context: str  # Stores the conversation history
+
+    # Core identifiers
+    user_id: int = Field(foreign_key="user.id", index=True)
+    text_id: int = Field(foreign_key="text.id", index=True)
+    chunk_id: int = Field(foreign_key="textchunk.id")  # For tracking progress
+
+    # AI conversation thread
+    conversation_context: str = Field(
+        default="[]", description="Stores the conversation history for AI context"
+    )
+
+    # Session management
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_at: datetime  # When this session should be cleaned up
+    expires_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=3)
+    )
     is_completed: bool = Field(default=False)
 
-    # Relationships
-    user: User = Relationship()
-    text: Text = Relationship()
-    chunk: TextChunk = Relationship()
+    class Config:
+        arbitrary_types_allowed = True

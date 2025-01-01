@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from database import get_session
-from models import TextChunk, User, ReadingSession
+from models import TextChunk, User
 from dotenv import load_dotenv
 import os
 from typing import Union, Literal
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.groq import GroqModel
-from .session_manager import ReadingSessionManager
+from .session_manager import get_or_create_session, append_to_conversation
 
 router = APIRouter(prefix="/questions", tags=["questions"])
 
@@ -25,10 +25,12 @@ class BuildQuestion(BaseModel):
 
 
 class AnswerEvalResponse(BaseModel):
-    message: str = Field(..., description="Evaluation of the student's answer")
+    message: str = Field(
+        ..., description="Evaluate the student's answer and provide feedback"
+    )
     can_proceed: bool = Field(
         ...,
-        description="Decide whether or not a student can proceed to the next reading assignment..",
+        description="Decide whether or not the student can proceed to the next reading section.",
     )
     question: Union[str, None] = Field(
         ..., description="A follow up question if the student needs more guidance."
@@ -69,12 +71,12 @@ def create_agent(return_type: Literal["buildquestion", "answerevalresponse"]):
         model,
         result_type=return_type,
         system_prompt=(
-            "You are a reading teacher."
+            "You are a reading teacher working one on one with a student."
+            "When replying, always reply directly to the student. Use words such as 'you' and 'your' when talking to the stuent."
             "When given a chunk of text, you will develop a challenging reading comprehension question based on that text."
-            "When you are given a student's answer, you will evaluate the answer. If the student's answer is unacceptable, you will develop a follow up question."
+            "When you are given a student's answer, you will evaluate the answere. If the answer isn't satisfactory, provide helpful feedback to the student."
+            "If the student's answer demonstrates a deep understanding of the text, you can advance the student to the next reading session."
             "When evaluating the answer, you will decide whether or not a student can proceed to the next reading assignment."
-            "If the student replies with flippant, inappropriate, silly, or aggressive answers, Tell the student they are receiving a demerit."
-            "Use the student's name when asking questions or providing feedback."
         ),
     )
 
@@ -82,10 +84,10 @@ def create_agent(return_type: Literal["buildquestion", "answerevalresponse"]):
 gen_agent = create_agent("buildquestion")
 eval_agent = create_agent("answerevalresponse")
 
-
-@gen_agent.system_prompt
-def add_the_users_name(ctx: RunContext[str]) -> str:
-    return f"The user's name is {ctx.deps}."
+# add the username of the student to the agent
+# @gen_agent.system_prompt
+# def add_the_users_name(ctx: RunContext[str]) -> str:
+#     return f"The user's name is {ctx.deps}."
 
 
 def get_username(email: str, db: Session = Depends(get_session)) -> str:
@@ -94,46 +96,25 @@ def get_username(email: str, db: Session = Depends(get_session)) -> str:
     return user.username
 
 
-async def build_question(chunk: str, username: str) -> str:
-    # Construct the query
+async def build_question(chunk: str) -> str:
     query = f"Reading sample: '{chunk}'. Analyze the reading sample and develop a reading comprehension question from the passage. Ask the student to answer your question."
-    result = await gen_agent.run(query, deps=username)
+    result = await gen_agent.run(query)
 
-    return result.data
+    # Clean up the question text - remove any 'question=' prefix and quotes
+    question_text = str(result.data.question)
+    if "question=" in question_text:
+        question_text = question_text.split("question=")[1].strip("'\"")
+    return question_text.rstrip("?")  # Remove trailing question mark if present
 
 
-async def handle_reading_session(
-    db: Session,
-    user_id: int,
-    text_id: int,
-    chunk_id: int,
-    message: dict,
-    complete_session: bool = False,
-) -> ReadingSession:
-    session_manager = ReadingSessionManager(db)
+async def build_evaluation(chunk: str, current_question: str, answer: str) -> str:
+    instructions_to_ai = """Look at the reading sample and the question you asked the student. You are to evaluate the merits of the student's answer 
+    and decide if the student understands well enough to proceed to the next question. If the student's
+    answer isn't acceptable, provide some feedback and possibly a hint to help the student better understand the text."""
 
-    # Get existing session by text_id instead of chunk_id
-    session = await session_manager.get_session(user_id=user_id, text_id=text_id)
-
-    if not session:
-        session = await session_manager.create_or_get_session(
-            user_id=user_id,
-            text_id=text_id,
-            chunk_id=chunk_id,  # Still store current chunk_id
-            initial_question="",
-        )
-    else:
-        # Update chunk_id to current chunk
-        session.chunk_id = chunk_id
-
-    await session_manager.update_conversation(
-        session_id=session.id, user_id=user_id, new_message=message
-    )
-
-    if complete_session:
-        await session_manager.complete_session(session_id=session.id, user_id=user_id)
-
-    return session
+    query = f"Reading sample: '{chunk}'. Question: '{current_question}. Answer: '{answer}'. Instructions: '{instructions_to_ai}'."
+    result = await eval_agent.run(query)
+    return result
 
 
 # student sends the reading chunk here. We reply with a reading comprehension question.
@@ -141,48 +122,49 @@ async def handle_reading_session(
 async def generate_question(
     request: QuestionRequest, db: Session = Depends(get_session)
 ):
-    """
-    Generate a question for the current chunk by first fetching chunk content from db.
-    """
-    # Get the chunk content from database
+    # Get chunk content
     statement = select(TextChunk).where(TextChunk.id == request.chunk_id)
     chunk = db.exec(statement).first()
-
     if not chunk:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Text Chunk not found"
         )
 
-    # Store the chunk text in a variable
-    chunk_text = chunk.content
-
-    # get the username and user_id of the student
+    # Get user info
     statement = select(User).where(User.email == request.user_email)
     user = db.exec(statement).first()
-    username = user.username
-    user_id = user.id
-
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="user not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # develop question
+    # Get or create session
+    session = await get_or_create_session(
+        user_id=user.id, text_id=request.text_id, chunk_id=request.chunk_id, db=db
+    )
 
-    current_question = await build_question(chunk_text, username)
-
-    # TODO check for current session. If one exists, add to it. If it doesnt, creat it
-
-    await handle_reading_session(
+    # Add chunk to conversation
+    await append_to_conversation(
+        session_id=session.id,
+        role="system",
+        content=f"CHUNK: {chunk.content}",
+        msg_type="chunk",
         db=db,
-        user_id=user_id,
-        text_id=request.text_id,
-        chunk_id=request.chunk_id,
-        message={
-            "role": "assistant",
-            "content": str(current_question),
-            "type": "question",
-        },
+    )
+
+    # For testing, use dummy question
+    current_question = "how do you feel about this."
+
+    # When ready for AI, uncomment this:
+    # current_question = await build_question(chunk.content)
+
+    # Add question to conversation
+    await append_to_conversation(
+        session_id=session.id,
+        role="assistant",
+        content=f"QUESTION: {current_question}",
+        msg_type="question",
+        db=db,
     )
 
     return QuestionResponse(question=f"{current_question}?")
@@ -192,34 +174,43 @@ async def generate_question(
 async def evaluate_answer(
     request: AnswerEvalRequest, db: Session = Depends(get_session)
 ):
-    return AnswerEvalResponse(
-        message="Good start, but let's explore this further.",
-        can_proceed=False,
-        question="Can you provide a specific example from the text to support your answer?",
-        conversation_id="dummy-convo-123",
-    )
+    # get the chunk used to ask question
+    statement = select(TextChunk).where(TextChunk.id == request.chunk_id)
+    chunk = db.exec(statement).first()
+    if not chunk:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Text Chunk not found"
+        )
 
-    # """
-    # Evaluate student's answer and determine if they can proceed.
-    # This is a dummy version that alternates between proceeding and asking follow-up.
-    # """
-    # # This is just a dummy response - will be replaced with real AI logic
-    # # For testing, let's just alternate between proceed and follow-up
-    # import random
-
-    # is_satisfactory = random.choice([True, False])
-
-    # if is_satisfactory:
-    #     return AnswerEvalResponse(
-    #         message="Excellent work! You've shown good understanding of this section.",
-    #         can_proceed=True,
-    #         question=None,
-    #         conversation_id="dummy-convo-123",
-    #     )
-    # else:
-    #     return AnswerEvalResponse(
-    #         message="Good start, but let's explore this further.",
-    #         can_proceed=False,
-    #         question="Can you provide a specific example from the text to support your answer?",
-    #         conversation_id="dummy-convo-123",
+    # result = await build_evaluation(chunk, request.current_question, request.answer)
+    # return AnswerEvalResponse(
+    #     message=result.data.message,
+    #     can_proceed=result.data.can_proceed,
+    #     question=result.data.question,
+    #     conversation_id="dummy-number 123",
     # )
+
+    """
+    Evaluate student's answer and determine if they can proceed.
+    This is a dummy version that alternates between proceeding and asking follow-up.
+    """
+    # This is just a dummy response - will be replaced with real AI logic
+    # For testing, let's just alternate between proceed and follow-up
+    import random
+
+    is_satisfactory = random.choice([True, False])
+
+    if is_satisfactory:
+        return AnswerEvalResponse(
+            message="Excellent work! You've shown good understanding of this section.",
+            can_proceed=True,
+            question=None,
+            conversation_id="dummy-convo-123",
+        )
+    else:
+        return AnswerEvalResponse(
+            message="Good start, but let's explore this further.",
+            can_proceed=False,
+            question="Can you provide a specific example from the text to support your answer?",
+            conversation_id="dummy-convo-123",
+        )

@@ -57,14 +57,13 @@ class TextChunk(SQLModel, table=True):
 
 
 class ReadingCompletion(SQLModel, table=True):
-    # Records student completion of entire text assignments
-    # Includes AI feedback and pass/fail status
     id: Optional[int] = Field(default=None, primary_key=True)
     student_id: int = Field(foreign_key="user.id")
     text_id: int = Field(foreign_key="text.id")
     completed_at: datetime = Field(default=datetime.now(timezone.utc))
     passed: bool
     ai_feedback: str
+    correct_answers: int = Field(default=0)
 
     student: User = Relationship(back_populates="reading_completions")
     text: Text = Relationship(back_populates="completions")

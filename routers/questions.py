@@ -110,17 +110,16 @@ async def build_question(chunk: str) -> str:
 async def build_evaluation(
     chunk: str, current_question: str, answer: str
 ) -> AnswerEvalResponse:
-    """Evaluate student answer and provide feedback"""
     try:
-        instructions_to_ai = """Evaluate the student's answer using this simple rubric:
-
-1. Basic Understanding: Does the answer show a general grasp of the main idea?
-2. Supporting Details: Are any relevant details mentioned? 
-3. Expression: Can the student communicate their basic understanding?
-
-Let students proceed if they show basic comprehension, even if the answer isn't complete or perfect. When giving feedback, start with what they got right and offer gentle suggestions. Use encouraging language like "you're on the right track."
-
-Students should proceed if they demonstrate general understanding of the main point, even if some details are missing."""
+        instructions_to_ai = (
+            "Evaluate the student's answer using this simple rubric:\n\n"
+            "1. Basic Understanding: The student's answer shows a solid grasp of the main idea.\n"
+            "2. Supporting Details: The student offers specific and relevant details to support their answer.\n"
+            "3. Expression: The student's answer is clear and coherent. Some grammatical errors can be allowed.\n\n"
+            "When giving feedback, start with what they got right and offer gentle suggestions. Use encouraging language.\n\n"
+            "Students should proceed if they demonstrate Basic Understanding of the main point, and offer accurate "
+            "Supporting Details, even if some details are missing."
+        )
 
         query = f"Reading sample: '{chunk}'. Question: '{current_question}'. Answer: '{answer}'. Instructions: '{instructions_to_ai}'."
         result = await eval_agent.run(query)
@@ -215,7 +214,6 @@ async def evaluate_answer(
             msg_type="answer",
             db=db,
         )
-
         result = await build_evaluation(
             chunk.content, request.current_question, request.answer
         )

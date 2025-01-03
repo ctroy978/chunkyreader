@@ -77,16 +77,27 @@ class TestResult(BaseModel):
 def create_agent(return_type: Literal["testquestions", "evalanswers"]):
     if return_type == "testquestions":
         return_type = TestQuestions
+        prompt = (
+            "You are creating and evaluating a final comprehension test for students "
+            "who have just completed reading a text. Generate 5 challenging questions that "
+            "test overall understanding of the main themes, events, and concepts."
+        )
     elif return_type == "evalanswers":
         return_type = EvalAnswers
+        prompt = (
+            "Evaluate the student's answer using this simple rubric:\n"
+            "1. Basic Understanding: The student's answer shows a general grasp of the main idea.\n"
+            "2. Supporting Details: The student offers most of the relevant details to support their answer.\n"
+            "3. Expression: The student's answer is clear and coherent. Some grammatical errors can be allowed.\n\n"
+            "When giving feedback, start with what they got right and offer gentle suggestions. "
+            "Use encouraging language. Students should be awarded the point if they demonstrate "
+            "Basic Understanding of the main point, and offer accurate Supporting Details, "
+            "even if some details are missing."
+        )
     return Agent(
         model,
         result_type=return_type,
-        system_prompt=(
-            "You are creating and evaluating a final comprehension test for students who have "
-            "just completed reading a text. Generate 5 challenging questions that "
-            "test overall understanding of the main themes, events, and concepts."
-        ),
+        system_prompt=prompt,
     )
 
 
@@ -229,6 +240,36 @@ async def submit_test(
 
     # Store results and complete session
     session.is_completed = True
+
+    # Handle ReadingCompletion record
+    existing_completion = db.exec(
+        select(ReadingCompletion).where(
+            ReadingCompletion.student_id == current_user.id,
+            ReadingCompletion.text_id == submission.text_id,
+        )
+    ).first()
+
+    # Pass if 4 or more correct out of 5
+    passed = result.data.correct >= 4
+
+    if existing_completion:
+        # Only update if new score is better
+        if result.data.correct > existing_completion.correct_answers:
+            existing_completion.passed = passed
+            existing_completion.ai_feedback = result.data.feedback
+            existing_completion.correct_answers = result.data.correct
+            existing_completion.completed_at = datetime.now(timezone.utc)
+    else:
+        # Create new completion record
+        completion = ReadingCompletion(
+            student_id=current_user.id,
+            text_id=submission.text_id,
+            passed=passed,
+            ai_feedback=result.data.feedback,
+            correct_answers=result.data.correct,
+        )
+        db.add(completion)
+
     db.commit()
 
     return TestResult(

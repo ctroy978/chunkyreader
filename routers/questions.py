@@ -107,14 +107,34 @@ async def build_question(chunk: str) -> str:
     return question_text.rstrip("?")  # Remove trailing question mark if present
 
 
-async def build_evaluation(chunk: str, current_question: str, answer: str) -> str:
-    instructions_to_ai = """Look at the reading sample and the question you asked the student. You are to evaluate the merits of the student's answer 
-    and decide if the student understands well enough to proceed to the next question. If the student's
-    answer isn't acceptable, provide some feedback and possibly a hint to help the student better understand the text."""
+async def build_evaluation(
+    chunk: str, current_question: str, answer: str
+) -> AnswerEvalResponse:
+    """Evaluate student answer and provide feedback"""
+    try:
+        instructions_to_ai = """Evaluate the student's answer using this simple rubric:
 
-    query = f"Reading sample: '{chunk}'. Question: '{current_question}. Answer: '{answer}'. Instructions: '{instructions_to_ai}'."
-    result = await eval_agent.run(query)
-    return result
+1. Basic Understanding: Does the answer show a general grasp of the main idea?
+2. Supporting Details: Are any relevant details mentioned? 
+3. Expression: Can the student communicate their basic understanding?
+
+Let students proceed if they show basic comprehension, even if the answer isn't complete or perfect. When giving feedback, start with what they got right and offer gentle suggestions. Use encouraging language like "you're on the right track."
+
+Students should proceed if they demonstrate general understanding of the main point, even if some details are missing."""
+
+        query = f"Reading sample: '{chunk}'. Question: '{current_question}'. Answer: '{answer}'. Instructions: '{instructions_to_ai}'."
+        result = await eval_agent.run(query)
+
+        return result.data
+
+    except Exception as e:
+        # Return a graceful fallback response if AI evaluation fails
+        return AnswerEvalResponse(
+            message="I cannot properly evaluate your answer right now. Please try submitting again.",
+            can_proceed=False,
+            question=current_question,
+            conversation_id="error",
+        )
 
 
 # student sends the reading chunk here. We reply with a reading comprehension question.
@@ -144,10 +164,10 @@ async def generate_question(
     )
 
     # For testing, use dummy question
-    current_question = "how do you feel about this."
+    # current_question = "how do you feel about this."
 
     # When ready for AI, uncomment this:
-    # current_question = await build_question(chunk.content)
+    current_question = await build_question(chunk.content)
 
     # Add question to conversation
     await append_to_conversation(
@@ -165,67 +185,71 @@ async def generate_question(
 async def evaluate_answer(
     request: AnswerEvalRequest, db: Session = Depends(get_session)
 ):
-    # get the chunk used to ask question
-    statement = select(TextChunk).where(TextChunk.id == request.chunk_id)
-    chunk = db.exec(statement).first()
-    if not chunk:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Text Chunk not found"
-        )
+    try:
+        # Get the chunk used to ask question
+        statement = select(TextChunk).where(TextChunk.id == request.chunk_id)
+        chunk = db.exec(statement).first()
+        if not chunk:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Text Chunk not found"
+            )
 
-    # Get user info
-    statement = select(User).where(User.email == request.user_email)
-    user = db.exec(statement).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
+        # Get user info
+        statement = select(User).where(User.email == request.user_email)
+        user = db.exec(statement).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
         # Get/create session
-    session = await get_or_create_session(
-        user_id=user.id, text_id=request.text_id, chunk_id=request.chunk_id, db=db
-    )
+        session = await get_or_create_session(
+            user_id=user.id, text_id=request.text_id, chunk_id=request.chunk_id, db=db
+        )
 
-    # Store student's answer
-    await append_to_conversation(
-        session_id=session.id,
-        role="user",
-        content=request.answer,
-        msg_type="answer",
-        db=db,
-    )
+        # Store student's answer
+        await append_to_conversation(
+            session_id=session.id,
+            role="user",
+            content=request.answer,
+            msg_type="answer",
+            db=db,
+        )
 
-    # result = await build_evaluation(chunk, request.current_question, request.answer)
+        result = await build_evaluation(
+            chunk.content, request.current_question, request.answer
+        )
 
-    # # Store feedback
-    # await append_to_conversation(
-    #     session_id=session.id,
-    #     role="assistant",
-    #     content=result.data.message,
-    #     msg_type="feedback",
-    #     db=db,
-    # )
+        # Store feedback
+        await append_to_conversation(
+            session_id=session.id,
+            role="assistant",
+            content=result.message,
+            msg_type="feedback",
+            db=db,
+        )
 
-    # # Store follow-up question if exists
-    # if result.data.question:
-    #     await append_to_conversation(
-    #         session_id=session.id,
-    #         role="assistant",
-    #         content=result.data.question,
-    #         msg_type="question",
-    #         db=db,
-    #     )
+        # Store follow-up question if exists
+        if result.question:
+            await append_to_conversation(
+                session_id=session.id,
+                role="assistant",
+                content=result.question,
+                msg_type="question",
+                db=db,
+            )
 
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error evaluating answer: {str(e)}",
+        )
+    # this is dummy response.
     # return AnswerEvalResponse(
-    #     message=result.data.message,
-    #     can_proceed=result.data.can_proceed,
-    #     question=result.data.question,
-    #     conversation_id=str(session.id),
+    #     message="This is the message",
+    #     can_proceed=True,
+    #     question="This is from question",
+    #     conversation_id="dummy_id 123",
     # )
-
-    return AnswerEvalResponse(
-        message="This is the message",
-        can_proceed=True,
-        question="This is from question",
-        conversation_id="dummy_id 123",
-    )

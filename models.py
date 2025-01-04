@@ -23,6 +23,15 @@ class User(SQLModel, table=True):
         back_populates="student"
     )
 
+    # admin relationships
+    admin_privilege: Optional["AdminPrivilege"] = Relationship(
+        back_populates="user",
+        sa_relationship_kwargs={
+            "uselist": False,  # One-to-one relationship
+            "foreign_keys": "[AdminPrivilege.user_id]",
+        },
+    )
+
 
 class TextBase(SQLModel):
     # Base model for text content that will be divided into chunks
@@ -91,3 +100,21 @@ class ReadingSession(SQLModel, table=True):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class AdminPrivilege(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    granted_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    granted_by_id: Optional[int] = Field(foreign_key="user.id", nullable=True)
+    grant_reason: Optional[str] = Field(default=None)
+    is_active: bool = Field(default=True)
+
+    # Relationships
+    user: "User" = Relationship(
+        back_populates="admin_privilege",
+        sa_relationship_kwargs={"foreign_keys": "[AdminPrivilege.user_id]"},
+    )
+    granted_by: Optional["User"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[AdminPrivilege.granted_by_id]"}
+    )

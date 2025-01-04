@@ -4,7 +4,7 @@ from typing import Optional
 
 # from datetime import timedelta
 from pydantic import BaseModel, EmailStr
-from models import User
+from models import User, AdminPrivilege
 from sqlmodel import Session, select
 from .dependencies import pwd_context  # for password hashing
 import secrets  # for generating random tokens
@@ -12,6 +12,7 @@ import string  # for generating verification code
 from datetime import datetime, timedelta, timezone  # for timestamp handling
 from fastapi_mail import MessageSchema
 from .otp import fastmail  # Add this import
+from sqlalchemy import and_
 
 from database import get_session
 from .dependencies import (
@@ -57,20 +58,29 @@ async def verify_otp(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid OTP"
         )
 
-    # Get the user to include username in token
-    user = db.exec(select(User).where(User.email == verify_data.email)).first()
+    # Get the user to include username and check admin status
+    statement = (
+        select(User, AdminPrivilege)
+        .outerjoin(
+            AdminPrivilege,
+            and_(User.id == AdminPrivilege.user_id, AdminPrivilege.is_active == True),
+        )
+        .where(User.email == verify_data.email)
+    )
+
+    result = db.exec(statement).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user, admin_privilege = result
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    # access_token = create_access_token(
-    #     data={"sub": verify_data.email, "username": user.username},
-    #     expires_delta=access_token_expires,
-    # )
-
     access_token = create_access_token(
         data={
             "sub": verify_data.email,
             "username": user.username,
-            "is_teacher": user.is_teacher,  # Add this line
+            "is_teacher": user.is_teacher,
+            "admin_privilege": admin_privilege is not None,
         },
         expires_delta=access_token_expires,
     )

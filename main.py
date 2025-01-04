@@ -6,7 +6,7 @@ from typing import List
 
 from database import create_db_and_tables
 
-from routers import addtext, student, questions, session_manager, test
+from routers import addtext, student, questions, session_manager, test, completions
 from auth.routes import router as auth_router
 
 
@@ -47,3 +47,4 @@ app.include_router(student.router)
 app.include_router(questions.router)
 app.include_router(session_manager.router)
 app.include_router(test.router)
+app.include_router(completions.router)

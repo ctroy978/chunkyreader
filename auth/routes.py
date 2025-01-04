@@ -61,8 +61,17 @@ async def verify_otp(
     user = db.exec(select(User).where(User.email == verify_data.email)).first()
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # access_token = create_access_token(
+    #     data={"sub": verify_data.email, "username": user.username},
+    #     expires_delta=access_token_expires,
+    # )
+
     access_token = create_access_token(
-        data={"sub": verify_data.email, "username": user.username},
+        data={
+            "sub": verify_data.email,
+            "username": user.username,
+            "is_teacher": user.is_teacher,  # Add this line
+        },
         expires_delta=access_token_expires,
     )
 

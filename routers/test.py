@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from .session_manager import get_or_create_session, append_to_conversation
 from auth.dependencies import get_current_user
 
-
 router = APIRouter(prefix="/test", tags=["test"])
 
 model = GroqModel("llama-3.1-70b-versatile")
@@ -35,9 +34,15 @@ class TestQuestions(BaseModel):
     questions: List[Question]
 
 
+class TestAnswer(BaseModel):
+    sequence: int
+    question: str
+    answer: str
+
+
 class TestSubmission(BaseModel):
     text_id: int
-    answers: List[str]  # Array of answers in same order as questions
+    answers: List[TestAnswer]
 
 
 class TestSessionData(BaseModel):
@@ -48,11 +53,6 @@ class TestSessionData(BaseModel):
 
 class TestRequest(BaseModel):
     text_id: int
-
-
-class TestAnswer(BaseModel):
-    question_id: int
-    answer: str
 
 
 class EvalAnswers(BaseModel):
@@ -77,23 +77,20 @@ class TestResult(BaseModel):
 def create_agent(return_type: Literal["testquestions", "evalanswers"]):
     if return_type == "testquestions":
         return_type = TestQuestions
-        prompt = (
-            "You are creating and evaluating a final comprehension test for students "
-            "who have just completed reading a text. Generate 5 challenging questions that "
-            "test overall understanding of the main themes, events, and concepts."
-        )
+        prompt = """You are creating and evaluating a final comprehension test for students who have 
+            just completed reading a text. Generate 5 challenging questions that
+            test overall understanding of the main themes, events, and concepts. """
     elif return_type == "evalanswers":
         return_type = EvalAnswers
-        prompt = (
-            "Evaluate the student's answer using this simple rubric:\n"
-            "1. Basic Understanding: The student's answer shows a general grasp of the main idea.\n"
-            "2. Supporting Details: The student offers most of the relevant details to support their answer.\n"
-            "3. Expression: The student's answer is clear and coherent. Some grammatical errors can be allowed.\n\n"
-            "When giving feedback, start with what they got right and offer gentle suggestions. "
-            "Use encouraging language. Students should be awarded the point if they demonstrate "
-            "Basic Understanding of the main point, and offer accurate Supporting Details, "
-            "even if some details are missing."
-        )
+        prompt = """ Evaluate the student's answer using this simple rubric: 
+            1. Basic Understanding: The student's answer shows a general grasp of the main idea.
+            2. Supporting Details: The student offers most of the relevant details to support their answer.
+            3. Expression: The student's answer is clear and coherent. Some grammatical errors can be allowed.
+            
+            When giving feedback, start with what they got right and offer gentle suggestions. 
+            Use encouraging language. Students should be awarded the point if they demonstrate Basic Understanding 
+            of the main point, and offer accurate Supporting Details, even if some details are missing."""
+
     return Agent(
         model,
         result_type=return_type,
@@ -115,9 +112,6 @@ def clean_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text)
     # Remove leading/trailing whitespace
     return text.strip()
-
-
-# test.py
 
 
 @router.post("/generate", response_model=TestQuestions)
@@ -174,7 +168,6 @@ async def generate_test(
     return TestQuestions(text_id=text.id, questions=sequential_questions)
 
 
-#################
 @router.post("/submit", response_model=TestResult)
 async def submit_test(
     submission: TestSubmission,
@@ -209,31 +202,34 @@ async def submit_test(
     if not test_data:
         raise HTTPException(status_code=404, detail="Test data not found")
 
-    # Prepare evaluation data with sequential questions and answers
+    # Sort answers by sequence to ensure proper order
+    sorted_answers = sorted(submission.answers, key=lambda x: x.sequence)
+
+    # Prepare evaluation data with properly matched questions and answers
     evaluation_data = {
         "original_text": "\n".join(test_data["chunks"]),
         "questions_and_answers": [
             {
-                "sequence": i + 1,
-                "question": question,
-                "student_answer": submission.answers[i],
+                "sequence": answer.sequence,
+                "question": answer.question,
+                "student_answer": answer.answer,
             }
-            for i, question in enumerate(test_data["questions"])
+            for answer in sorted_answers
         ],
     }
 
     # Generate evaluation prompt
     evaluation_prompt = f"""
-   Original text:
-   {evaluation_data['original_text']}
+    Original text:
+    {evaluation_data['original_text']}
 
-   Student answers:
-   """
+    Please evaluate these student answers:
+    """
     for qa in evaluation_data["questions_and_answers"]:
         evaluation_prompt += f"""
-       Question {qa['sequence']}: {qa['question']}
-       Answer: {qa['student_answer']}
-       """
+        Question {qa['sequence']}: {qa['question']}
+        Student's Answer: {qa['student_answer']}
+        """
 
     # Evaluate answers
     result = await eval_agent.run(evaluation_prompt)
@@ -253,14 +249,12 @@ async def submit_test(
     passed = result.data.correct >= 4
 
     if existing_completion:
-        # Only update if new score is better
         if result.data.correct > existing_completion.correct_answers:
             existing_completion.passed = passed
             existing_completion.ai_feedback = result.data.feedback
             existing_completion.correct_answers = result.data.correct
             existing_completion.completed_at = datetime.now(timezone.utc)
     else:
-        # Create new completion record
         completion = ReadingCompletion(
             student_id=current_user.id,
             text_id=submission.text_id,

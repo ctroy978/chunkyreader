@@ -214,46 +214,43 @@ async def create_text(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/texts/", response_model=List[dict])
+@router.get("/texts/")
 async def get_texts(
-    session: Session = Depends(get_session),
-    current_teacher: User = Depends(get_current_teacher),
+    db: Session = Depends(get_session),
+    current_user: User = Depends(get_current_teacher),
 ):
-    """Get all texts for the current teacher"""
-    texts = session.exec(
-        select(Text).where(Text.teacher_id == current_teacher.id)
-    ).all()
-
-    return [
-        {"id": text.id, "title": text.title, "created_at": text.created_at}
-        for text in texts
-    ]
+    """Get all non-deleted texts for a teacher"""
+    statement = select(Text).where(
+        Text.teacher_id == current_user.id,
+        Text.is_deleted == False,  # Add this condition
+    )
+    texts = db.exec(statement).all()
+    return texts
 
 
 @router.delete("/texts/{text_id}")
 async def delete_text(
     text_id: int,
-    session: Session = Depends(get_session),
-    current_teacher: User = Depends(get_current_teacher),
+    db: Session = Depends(get_session),
+    current_user: User = Depends(get_current_teacher),
 ):
-    # Verify the text belongs to the current teacher
-    text = session.get(Text, text_id)
+    """Soft delete a text"""
+    # First verify the text exists and belongs to this teacher
+    text = db.get(Text, text_id)
     if not text:
-        raise HTTPException(status_code=404, detail="Text not found")
-
-    if text.teacher_id != current_teacher.id:
         raise HTTPException(
-            status_code=403, detail="Not authorized to delete this text"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Text not found"
         )
 
-    # Delete associated chunks first
-    chunks_statement = select(TextChunk).where(TextChunk.text_id == text_id)
-    chunks = session.exec(chunks_statement).all()
-    for chunk in chunks:
-        session.delete(chunk)
+    if text.teacher_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this text",
+        )
 
-    # Delete the text
-    session.delete(text)
-    session.commit()
+    # Implement soft delete
+    text.is_deleted = True
+    text.deleted_at = datetime.now(timezone.utc)
+    db.commit()
 
-    return {"message": f"Text {text_id} and its chunks deleted"}
+    return {"message": "Text successfully deleted"}

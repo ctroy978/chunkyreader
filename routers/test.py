@@ -121,7 +121,7 @@ async def generate_test(
     current_user: User = Depends(get_current_user),
 ):
     # Get text and validate
-    text_stmt = select(Text).where(Text.id == request.text_id)
+    text_stmt = select(Text).where(Text.id == request.text_id, Text.is_deleted == False)
     text = db.exec(text_stmt).first()
     if not text:
         raise HTTPException(status_code=404, detail="Text not found")
@@ -175,7 +175,9 @@ async def submit_test(
     db: Session = Depends(get_session),
 ):
     # Validate text exists
-    text = db.exec(select(Text).where(Text.id == submission.text_id)).first()
+    text = db.exec(
+        select(Text).where(Text.id == submission.text_id, Text.is_deleted == False)
+    ).first()
     if not text:
         raise HTTPException(status_code=404, detail="Text not found")
 

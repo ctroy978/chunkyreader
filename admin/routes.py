@@ -3,7 +3,7 @@ from sqlmodel import Session, select
 from typing import List
 from pydantic import BaseModel
 from database import get_session
-from models import User, AdminPrivilege
+from models import User, AdminPrivilege, Text
 from auth.dependencies import get_current_user
 from datetime import datetime, timezone
 
@@ -249,3 +249,37 @@ async def delete_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting user: {str(e)}",
         )
+
+
+@router.delete("/texts/{text_id}")
+async def admin_delete_text(
+    text_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_session),
+):
+    """Admin soft delete for texts"""
+    # Verify current user is admin
+    admin_check = db.exec(
+        select(AdminPrivilege).where(
+            AdminPrivilege.user_id == current_user.id, AdminPrivilege.is_active == True
+        )
+    ).first()
+
+    if not admin_check:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can delete texts"
+        )
+
+    # Get text
+    text = db.get(Text, text_id)
+    if not text:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Text not found"
+        )
+
+    # Implement soft delete
+    text.is_deleted = True
+    text.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"message": "Text successfully deleted", "text_id": text_id}

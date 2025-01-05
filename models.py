@@ -41,6 +41,8 @@ class TextBase(SQLModel):
     created_at: datetime
     teacher_id: Optional[int] = Field(foreign_key="user.id")
     total_chunks: int
+    is_deleted: bool = Field(default=False, index=True)
+    deleted_at: Optional[datetime] = Field(default=None)
 
 
 class Text(TextBase, table=True):

@@ -26,7 +26,7 @@ async def get_teacher_texts(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all texts for a specific teacher"""
+    """Get all non-deleted texts for a specific teacher"""
     # Verify the requested user is actually a teacher
     teacher = session.exec(
         select(User).where(User.id == teacher_id).where(User.is_teacher == True)
@@ -35,8 +35,12 @@ async def get_teacher_texts(
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    texts = session.exec(select(Text).where(Text.teacher_id == teacher_id)).all()
+    # Get texts that aren't deleted
+    texts = session.exec(
+        select(Text).where(Text.teacher_id == teacher_id, Text.is_deleted == False)
+    ).all()
 
+    # Return in the same format as before
     return [{"id": t.id, "title": t.title, "created_at": t.created_at} for t in texts]
 
 
@@ -47,6 +51,17 @@ async def get_first_chunk(
     current_user: User = Depends(get_current_user),
 ):
     """Get the first chunk of a specific text"""
+    # First verify text exists and isn't deleted
+    text = session.exec(
+        select(Text).where(Text.id == text_id, Text.is_deleted == False)
+    ).first()
+
+    if not text:
+        raise HTTPException(
+            status_code=404, detail="Text not found or has been deleted"
+        )
+
+    # Get first chunk
     chunk = session.exec(
         select(TextChunk)
         .where(TextChunk.text_id == text_id)
@@ -71,6 +86,16 @@ async def get_next_chunk(
     current_user: User = Depends(get_current_user),
 ):
     """Get the next chunk of text after the current chunk"""
+    # First verify text exists and isn't deleted
+    text = session.exec(
+        select(Text).where(Text.id == text_id, Text.is_deleted == False)
+    ).first()
+
+    if not text:
+        raise HTTPException(
+            status_code=404, detail="Text not found or has been deleted"
+        )
+
     # First get the current chunk to know its sequence number
     current_chunk = session.exec(
         select(TextChunk)

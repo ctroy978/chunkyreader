@@ -96,15 +96,99 @@ def get_username(email: str, db: Session = Depends(get_session)) -> str:
     return user.username
 
 
-async def build_question(chunk: str) -> str:
-    query = f"Reading sample: '{chunk}'. Analyze the reading sample and develop a reading comprehension question from the passage. Ask the student to answer your question."
-    result = await gen_agent.run(query)
+# async def build_question(chunk: str) -> str:
+#     query = f"Reading sample: '{chunk}'. Analyze the reading sample and develop a reading comprehension question from the passage. Ask the student to answer your question."
+#     result = await gen_agent.run(query)
 
-    # Clean up the question text - remove any 'question=' prefix and quotes
-    question_text = str(result.data.question)
-    if "question=" in question_text:
-        question_text = question_text.split("question=")[1].strip("'\"")
-    return question_text.rstrip("?")  # Remove trailing question mark if present
+#     # Clean up the question text - remove any 'question=' prefix and quotes
+#     question_text = str(result.data.question)
+#     if "question=" in question_text:
+#         question_text = question_text.split("question=")[1].strip("'\"")
+#     return question_text.rstrip("?")  # Remove trailing question mark if present
+
+
+async def build_question(chunk: str) -> str:
+    try:
+        query = f"Reading sample: '{chunk}'. Analyze the reading sample and develop a reading comprehension question from the passage. Ask the student to answer your question."
+
+        # Add retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = await gen_agent.run(query)
+
+                # Clean up the question text - remove any 'question=' prefix and quotes
+                question_text = str(result.data.question)
+                if "question=" in question_text:
+                    question_text = question_text.split("question=")[1].strip("'\"")
+                return question_text.rstrip(
+                    "?"
+                )  # Remove trailing question mark if present
+
+            except Exception as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    raise
+                continue  # Try again
+
+    except Exception as e:
+        # Log the error for debugging
+        print(f"Error generating question: {str(e)}")
+        # Return a fallback question if AI fails
+        return "Please summarize the main points of this passage. What did you learn?"
+
+
+@router.post("/generate", response_model=QuestionResponse)
+async def generate_question(
+    request: QuestionRequest, db: Session = Depends(get_session)
+):
+    try:
+        # Get chunk content
+        statement = select(TextChunk).where(TextChunk.id == request.chunk_id)
+        chunk = db.exec(statement).first()
+        if not chunk:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Text Chunk not found"
+            )
+
+        # Get user info
+        statement = select(User).where(User.email == request.user_email)
+        user = db.exec(statement).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+
+        # Check if session is active and user is authenticated
+        session = await get_or_create_session(
+            user_id=user.id, text_id=request.text_id, chunk_id=request.chunk_id, db=db
+        )
+
+        # Generate question with fallback
+        try:
+            current_question = await build_question(chunk.content)
+        except Exception as e:
+            print(f"Failed to generate question: {str(e)}")
+            current_question = (
+                "Please summarize the main points of this passage. What did you learn?"
+            )
+
+        # Add question to conversation
+        await append_to_conversation(
+            session_id=session.id,
+            role="assistant",
+            content=f"QUESTION: {current_question}",
+            msg_type="question",
+            db=db,
+        )
+
+        return QuestionResponse(question=f"{current_question}?")
+
+    except Exception as e:
+        print(f"Error in generate_question endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate question. Please try again.",
+        )
 
 
 async def build_evaluation(

@@ -8,6 +8,7 @@ from auth.otp import OTPHandler
 import os
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 # Email configuration

@@ -6,7 +6,15 @@ from typing import List
 
 from database import create_db_and_tables
 
-from routers import addtext, student, questions, session_manager, test, completions
+from routers import (
+    addtext,
+    student,
+    questions,
+    session_manager,
+    test,
+    completions,
+    vocab,
+)
 from auth.routes import router as auth_router
 from admin.routes import router as admin_router
 from admin.startup import setup_initial_admin
@@ -55,3 +63,4 @@ app.include_router(test.router)
 app.include_router(completions.router)
 app.include_router(admin_router)
 app.include_router(auth_router, prefix="/auth")
+app.include_router(vocab.router)  # Add the vocabulary router

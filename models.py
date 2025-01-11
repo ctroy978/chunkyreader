@@ -4,30 +4,24 @@ from datetime import datetime, timezone, timedelta
 
 
 class User(SQLModel, table=True):
-    # This is the base user model that handles both teachers and students
-    # Teachers can create texts and students can complete readings
-    # is_teacher flag determines user permissions and available features
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(unique=True)
     email: str
     full_name: str
     hashed_password: str
     is_teacher: bool = Field(default=False)
-
-    # Relationships:
-    # - teacher_texts: texts created by this user (if they're a teacher)
-    # - reading_completions: reading assignments completed by this user (if they're a student)
+    is_deleted: bool = Field(default=False, index=True)
+    deleted_at: Optional[datetime] = Field(default=None)
 
     teacher_texts: List["Text"] = Relationship(back_populates="teacher")
     reading_completions: List["ReadingCompletion"] = Relationship(
         back_populates="student"
     )
 
-    # admin relationships
     admin_privilege: Optional["AdminPrivilege"] = Relationship(
         back_populates="user",
         sa_relationship_kwargs={
-            "uselist": False,  # One-to-one relationship
+            "uselist": False,
             "foreign_keys": "[AdminPrivilege.user_id]",
         },
     )

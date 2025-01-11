@@ -42,6 +42,7 @@ Jinja2==3.1.5
 jiter==0.8.2
 jsonpath-python==1.0.6
 libsql-client==0.3.1
+libsql-experimental==0.0.41
 logfire-api==2.11.0
 markdown-it-py==3.0.0
 MarkupSafe==3.0.2

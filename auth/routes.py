@@ -39,6 +39,9 @@ class Token(BaseModel):
     token_type: str
 
 
+# In auth/routes.py
+
+
 @router.post("/request-otp")
 async def request_otp(request: OTPRequest, db: Session = Depends(get_session)) -> dict:
     """Request an OTP to be sent to the user's email."""
@@ -46,7 +49,7 @@ async def request_otp(request: OTPRequest, db: Session = Depends(get_session)) -
     return await otp_handler.handle_login_request(request.email)
 
 
-@router.post("/verify-otp", response_model=Token)
+@router.post("/verify-otp", response_model=Token)  # Add this decorator
 async def verify_otp(
     verify_data: OTPVerify, db: Session = Depends(get_session)
 ) -> Token:
@@ -65,7 +68,12 @@ async def verify_otp(
             AdminPrivilege,
             and_(User.id == AdminPrivilege.user_id, AdminPrivilege.is_active == True),
         )
-        .where(User.email == verify_data.email)
+        .where(
+            and_(
+                User.email == verify_data.email,
+                User.is_deleted == False,  # Add this condition
+            )
+        )
     )
 
     result = db.exec(statement).first()

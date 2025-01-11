@@ -1,5 +1,7 @@
+# In student.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from sqlalchemy import and_
 from typing import List
 from database import get_session
 from models import User, Text, TextChunk
@@ -14,9 +16,14 @@ async def get_teachers(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all teachers"""
-
-    teachers = session.exec(select(User).where(User.is_teacher == True)).all()
+    """Get all non-deleted teachers"""
+    teachers = session.exec(
+        select(User).where(
+            and_(
+                User.is_teacher == True, User.is_deleted == False  # Add this condition
+            )
+        )
+    ).all()
     return [{"id": t.id, "full_name": t.full_name} for t in teachers]
 
 
@@ -29,7 +36,13 @@ async def get_teacher_texts(
     """Get all non-deleted texts for a specific teacher"""
     # Verify the requested user is actually a teacher
     teacher = session.exec(
-        select(User).where(User.id == teacher_id).where(User.is_teacher == True)
+        select(User).where(
+            and_(
+                User.id == teacher_id,
+                User.is_teacher == True,
+                User.is_deleted == False,  # Add this condition
+            )
+        )
     ).first()
 
     if not teacher:
@@ -37,10 +50,11 @@ async def get_teacher_texts(
 
     # Get texts that aren't deleted
     texts = session.exec(
-        select(Text).where(Text.teacher_id == teacher_id, Text.is_deleted == False)
+        select(Text).where(
+            and_(Text.teacher_id == teacher_id, Text.is_deleted == False)
+        )
     ).all()
 
-    # Return in the same format as before
     return [{"id": t.id, "title": t.title, "created_at": t.created_at} for t in texts]
 
 
@@ -53,7 +67,7 @@ async def get_first_chunk(
     """Get the first chunk of a specific text"""
     # First verify text exists and isn't deleted
     text = session.exec(
-        select(Text).where(Text.id == text_id, Text.is_deleted == False)
+        select(Text).where(and_(Text.id == text_id, Text.is_deleted == False))
     ).first()
 
     if not text:
@@ -88,7 +102,7 @@ async def get_next_chunk(
     """Get the next chunk of text after the current chunk"""
     # First verify text exists and isn't deleted
     text = session.exec(
-        select(Text).where(Text.id == text_id, Text.is_deleted == False)
+        select(Text).where(and_(Text.id == text_id, Text.is_deleted == False))
     ).first()
 
     if not text:
